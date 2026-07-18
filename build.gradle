@@ -51,6 +51,19 @@ dependencies {
     implementation('io.socket:socket.io-client:2.1.2') {
         exclude group: 'com.squareup.okhttp3', module: 'okhttp'
     }
+    // socket.io-client pulls in engine.io-client, which transitively pulls in
+    // a 2009-era org.json:json (20090211). That old release is flagged by the
+    // Plugin Hub's automated review as containing a raw System.out call
+    // (leftover debug main() in one of its classes), even though it's dead
+    // code that never actually runs. Gradle resolves same-artifact version
+    // conflicts by picking the highest requested version by default, so
+    // declaring this directly overrides the old transitive one without an
+    // explicit resolutionStrategy.force. 20200518 is also already trusted by
+    // the Hub's shared dependency-verification metadata (see
+    // plugin-hub/package/verification-template/build.gradle, used by
+    // discord-rare-drop-notifier and droptracker), so this needs no new
+    // verification-metadata entry on the Hub side.
+    implementation 'org.json:json:20200518'
 
     testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
     testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
