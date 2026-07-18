@@ -19,8 +19,18 @@ repositories {
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
-    compileOnly group: 'org.projectlombok', name: 'lombok', version: '1.18.46'
-    annotationProcessor group: 'org.projectlombok', name: 'lombok', version: '1.18.46'
+    // Pinned to match the exact version the Plugin Hub's shared "core"
+    // dependency verification config already trusts (see
+    // plugin-hub/package/verification-template/build.gradle) — using any
+    // other version here fails Hub CI's dependency verification, since
+    // build=gradle mode resolves our own build.gradle as-is against that
+    // shared metadata rather than substituting its own. Originally bumped to
+    // 1.18.46 for a local ExceptionInInitializerError under a newer ad hoc
+    // JDK; should be fine at 1.18.30 now that dev builds are pinned to JDK
+    // 11 (matching the Hub CI's java-version: 11) — worth a clean rebuild in
+    // IntelliJ to confirm before pushing.
+    compileOnly group: 'org.projectlombok', name: 'lombok', version: '1.18.30'
+    annotationProcessor group: 'org.projectlombok', name: 'lombok', version: '1.18.30'
 
     // These are already on RuneLite's runtime classpath (it uses both
     // internally) — declared compileOnly here just so our own code compiles
