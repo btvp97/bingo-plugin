@@ -4,8 +4,8 @@ A RuneLite plugin for running clan bingo events. Join a team with a code your
 clan's board organizer gives you, and the plugin automatically detects
 qualifying in-game events (boss/monster kills, item drops, clue completions,
 and a handful of other tracked activities) and marks the matching tile
-complete — no manual reporting needed. Progress syncs live across your whole
-team.
+complete — no manual reporting needed. Progress syncs across your whole team
+automatically.
 
 ## Features
 
@@ -14,12 +14,19 @@ team.
   and a specific set of chat-message-driven activities (clue caskets, pet
   drops, Hunter rumours, raid completions, bone burying, and more — see
   `ChatPatterns.java` for the exact list).
-- **Live team sync** — a teammate completing a tile updates everyone's board
-  in real time, not just the player who triggered it.
+- **Automatic team sync** — a teammate completing a tile updates your board
+  too, within `POLL_INTERVAL_SECONDS` (currently 20s) of them reporting it,
+  not just the player who triggered it. This runs as a background poll over
+  plain HTTP rather than a persistent push connection — no extra third-party
+  dependency, no client-side socket to keep alive.
 - **On-screen feedback** — a pop-up banner when a tile completes, plus a
   persistent overlay showing live progress on any tile the team has started.
 - **Sidebar board view** — the full board, current score, team name, and a
   per-tile progress meter (e.g. "6/10").
+- **Item-icon tiles** — a tile can optionally show a real in-game item sprite
+  (rendered live via RuneLite's `ItemManager`, not a bundled image) instead
+  of its text title. Set `iconItemId` on the tile when authoring the board;
+  any OSRS item ID works, independent of what the tile actually detects.
 
 ## Setup (for players)
 
@@ -58,8 +65,8 @@ exactly what crosses the network, since that's worth being explicit about:
   detection (pure function, no RuneLite dependencies, easy to unit test).
 - `BingoPlugin.java` — wires everything together: join/refresh lifecycle,
   event subscribers (`NpcLootReceived`, `ServerNpcLoot`,
-  `ItemContainerChanged`, `ChatMessage`), overlay/sound triggers.
-- `BingoSocketClient.java` — Socket.IO connection for live sync.
+  `ItemContainerChanged`, `ChatMessage`), the background sync poll, overlay/
+  sound triggers.
 - `TileCompletionOverlay.java` / `BingoProgressOverlay.java` — on-screen UI.
 - `BingoPluginTest.java` — run this (under `src/test/java`) to launch a real
   RuneLite client with the plugin loaded, for local development.

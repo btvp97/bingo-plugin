@@ -18,6 +18,10 @@ public class TileState {
     public String metric;
     public String mode;
     public java.util.List<String> sources;
+    // Optional OSRS item ID to render (via ItemManager) instead of the tile's
+    // title text — independent of metric/sources, see backend schema.prisma.
+    // Gson leaves this null when the field is absent from the JSON response.
+    public Integer iconItemId;
     public boolean completed;
     public int repeatCount;
     public int sumProgress;

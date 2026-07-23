@@ -29,6 +29,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.ExecutorServiceExceptionLogger;
 import net.runelite.client.util.Text;
 
 import lombok.extern.slf4j.Slf4j;
@@ -42,12 +43,16 @@ import java.awt.image.BufferedImage;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 @Slf4j
 @PluginDescriptor(
         name = "Clan Bingo",
-        description = "Coordinate clan bingo boards with live team sync",
+        description = "Coordinate clan bingo boards with automatic team sync",
         tags = {"bingo", "pvm", "minigame", "clan"}
 )
 public class BingoPlugin extends Plugin {
@@ -78,10 +83,21 @@ public class BingoPlugin extends Plugin {
     @Inject
     private AudioPlayer audioPlayer;
 
-    // Not Guice-injected — it's a plain wrapper with no RuneLite
-    // dependencies of its own, just a live socket connection scoped to
-    // whichever team we're currently joined to. See attemptJoin()/shutDown().
-    private final BingoSocketClient socketClient = new BingoSocketClient();
+    // How often teammates' progress gets pulled in the background. This
+    // replaced a Socket.IO push connection (see git history) after a Plugin
+    // Hub maintainer rejected socket.io-client as a new third-party
+    // dependency on PR #13948 — polling trades a little latency for using
+    // only RuneLite's own already-bundled HTTP client, no new dependency at
+    // all. The player who actually detects an event still sees it instantly
+    // via the direct refreshBoard() call in reportCompletion(); this is only
+    // for picking up teammates' completions.
+    private static final int POLL_INTERVAL_SECONDS = 20;
+
+    // Own executor rather than a Guice-provided one, following the same
+    // pattern as RuneLite's own WorldHopperPlugin — created in startUp(),
+    // torn down in shutDown().
+    private ScheduledExecutorService pollExecutor;
+    private ScheduledFuture<?> pollFuture;
 
     // Classpath-resource path to the tile-completion sound, bundled at
     // src/main/resources/tile_complete.wav. This is a synthesized placeholder
@@ -99,9 +115,10 @@ public class BingoPlugin extends Plugin {
 
     // Last board state fetched from the server — this is what chat-detected
     // events get matched against locally before reporting. Kept up to date
-    // by refreshBoard(); until task 5's live sync exists, it can go briefly
-    // stale between refreshes, which just means a just-completed tile might
-    // get one redundant (harmless) completion report before the next fetch.
+    // by refreshBoard(), called both on each detected event and on the
+    // POLL_INTERVAL_SECONDS background poll; it can go briefly stale between
+    // those, which just means a just-completed tile might get one redundant
+    // (harmless) completion report before the next fetch.
     private volatile BoardStateResponse currentState;
 
     // Set when a "You have opened Larran's chest" chat message is seen;
@@ -121,7 +138,7 @@ public class BingoPlugin extends Plugin {
 
     @Override
     protected void startUp() {
-        panel = new BingoPanel();
+        panel = new BingoPanel(itemManager);
         panel.setOnRefresh(() -> new Thread(this::connectOrRefresh, "bingo-refresh").start());
 
         navButton = NavigationButton.builder()
@@ -134,6 +151,13 @@ public class BingoPlugin extends Plugin {
         overlayManager.add(completionOverlay);
         overlayManager.add(progressOverlay);
 
+        pollExecutor = new ExecutorServiceExceptionLogger(Executors.newSingleThreadScheduledExecutor());
+        pollFuture = pollExecutor.scheduleWithFixedDelay(() -> {
+            if (joined) {
+                refreshBoard();
+            }
+        }, POLL_INTERVAL_SECONDS, POLL_INTERVAL_SECONDS, TimeUnit.SECONDS);
+
         joined = false;
     }
 
@@ -142,7 +166,16 @@ public class BingoPlugin extends Plugin {
         clientToolbar.removeNavigation(navButton);
         overlayManager.remove(completionOverlay);
         overlayManager.remove(progressOverlay);
-        socketClient.disconnect();
+
+        if (pollFuture != null) {
+            pollFuture.cancel(true);
+            pollFuture = null;
+        }
+        if (pollExecutor != null) {
+            pollExecutor.shutdown();
+            pollExecutor = null;
+        }
+
         joined = false;
         boardId = null;
     }
@@ -194,12 +227,6 @@ public class BingoPlugin extends Plugin {
             this.boardId = joinResponse.boardId;
             this.joined = true;
             SwingUtilities.invokeLater(() -> panel.setTeamName(joinResponse.teamName));
-            // Live sync: teammates' completions push a "tile_update" over
-            // this socket the instant they're reported, so refreshBoard()
-            // runs for everyone on the team, not just whoever detected the
-            // event. Backend side of this (broadcasting to the team's room)
-            // already existed — this was the missing half.
-            socketClient.connect(config.baseUrl(), joinResponse.token, this::refreshBoard);
             refreshBoard();
         } catch (Exception e) {
             SwingUtilities.invokeLater(() -> panel.showError(e.getMessage()));
@@ -348,10 +375,9 @@ public class BingoPlugin extends Plugin {
                 playCompletionSound();
             }
             // Re-fetch so the panel and progress overlay reflect the new
-            // state. This is a stopgap until task 5 adds a WebSocket push —
-            // for now, only the player whose client detected the event sees
-            // it update immediately; teammates need to click Refresh to see
-            // it.
+            // state immediately for the player who triggered it. Teammates
+            // pick this up within POLL_INTERVAL_SECONDS via the background
+            // poll started in startUp() rather than an instant push.
             refreshBoard();
         } catch (Exception e) {
             SwingUtilities.invokeLater(() -> panel.showError(e.getMessage()));
