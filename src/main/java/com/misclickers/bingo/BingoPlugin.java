@@ -51,7 +51,7 @@ import java.util.regex.Matcher;
 
 @Slf4j
 @PluginDescriptor(
-        name = "Clan Bingo",
+        name = "Misclickers Clan Bingo",
         description = "Coordinate clan bingo boards with automatic team sync",
         tags = {"bingo", "pvm", "minigame", "clan"}
 )
@@ -142,7 +142,7 @@ public class BingoPlugin extends Plugin {
         panel.setOnRefresh(() -> new Thread(this::connectOrRefresh, "bingo-refresh").start());
 
         navButton = NavigationButton.builder()
-                .tooltip("Clan Bingo")
+                .tooltip("Misclickers Clan Bingo")
                 .icon(createBingoIcon())
                 .priority(5)
                 .panel(panel)

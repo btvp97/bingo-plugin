@@ -1,4 +1,4 @@
-# Clan Bingo
+# Misclickers Clan Bingo
 
 A RuneLite plugin for running clan bingo events. Join a team with a code your
 clan's board organizer gives you, and the plugin automatically detects
