@@ -19,6 +19,7 @@ import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.events.ServerNpcLoot;
@@ -113,6 +114,14 @@ public class BingoPlugin extends Plugin {
     private String boardId;
     private boolean joined;
 
+    // The join code actually used for the current `joined` session, captured
+    // at attemptJoin() time. Compared against config.joinCode() so a code
+    // typed into settings after joining is detected as "this needs a fresh
+    // join", instead of `joined` staying true and every Refresh/poll just
+    // re-fetching the old team's state forever. Cleared alongside
+    // joined/boardId in shutDown().
+    private String joinedCode;
+
     // Last board state fetched from the server — this is what chat-detected
     // events get matched against locally before reporting. Kept up to date
     // by refreshBoard(), called both on each detected event and on the
@@ -178,6 +187,7 @@ public class BingoPlugin extends Plugin {
 
         joined = false;
         boardId = null;
+        joinedCode = null;
     }
 
     /** Read by BingoProgressOverlay to render live per-tile progress. */
@@ -187,21 +197,47 @@ public class BingoPlugin extends Plugin {
 
     @Subscribe
     public void onGameStateChanged(GameStateChanged event) {
-        if (event.getGameState() != GameState.LOGGED_IN || joined) {
+        if (event.getGameState() != GameState.LOGGED_IN || (joined && !joinCodeChanged())) {
             return;
         }
         new Thread(this::connectOrRefresh, "bingo-join").start();
     }
 
     /**
+     * Re-joins as soon as the join code setting changes, rather than waiting
+     * for the player to notice nothing updated and hit Refresh. Guarded by
+     * joinCodeChanged() itself (via connectOrRefresh) so edits to the other
+     * config items don't trigger a pointless network call.
+     */
+    @Subscribe
+    public void onConfigChanged(ConfigChanged event) {
+        if (!"bingo".equals(event.getGroup()) || !"joinCode".equals(event.getKey())) {
+            return;
+        }
+        new Thread(this::connectOrRefresh, "bingo-rejoin").start();
+    }
+
+    /**
+     * True once a join has succeeded but the join code in settings no longer
+     * matches the one that join used — i.e. the player changed it and we
+     * haven't caught up yet.
+     */
+    private boolean joinCodeChanged() {
+        String current = config.joinCode() == null ? "" : config.joinCode().trim();
+        String joinedAs = joinedCode == null ? "" : joinedCode;
+        return !current.equals(joinedAs);
+    }
+
+    /**
      * Shared entry point for both the login trigger and the panel's Refresh
-     * button: joins if we haven't yet (e.g. the join code was set after
-     * login, so the login trigger fired too early to see it), otherwise just
+     * button: (re)joins if we haven't yet or the join code has since changed
+     * (e.g. it was set/edited after login, so the login trigger fired too
+     * early, or too late, to see the current value), otherwise just
      * re-fetches current board state. Runs blocking network calls — always
      * called from a background thread, never the client thread.
      */
     private void connectOrRefresh() {
-        if (!joined) {
+        if (!joined || joinCodeChanged()) {
             attemptJoin();
         } else {
             refreshBoard();
@@ -226,11 +262,13 @@ public class BingoPlugin extends Plugin {
             JoinResponse joinResponse = apiClient.join(config.joinCode(), rsn);
             this.boardId = joinResponse.boardId;
             this.joined = true;
+            this.joinedCode = config.joinCode().trim();
             SwingUtilities.invokeLater(() -> panel.setTeamName(joinResponse.teamName));
             refreshBoard();
         } catch (Exception e) {
             SwingUtilities.invokeLater(() -> panel.showError(e.getMessage()));
             this.joined = false;
+            this.joinedCode = null;
         }
     }
 

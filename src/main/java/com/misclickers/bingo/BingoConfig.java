@@ -25,4 +25,14 @@ public interface BingoConfig extends Config {
     default String joinCode() {
         return "";
     }
+
+    @ConfigItem(
+            keyName = "showProgressOverlay",
+            name = "Show progress overlay",
+            description = "Show the on-screen overlay listing tiles your team has partial progress on",
+            position = 2
+    )
+    default boolean showProgressOverlay() {
+        return true;
+    }
 }

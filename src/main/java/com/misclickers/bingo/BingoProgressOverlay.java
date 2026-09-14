@@ -23,16 +23,22 @@ public class BingoProgressOverlay extends OverlayPanel {
     private static final int MAX_TITLE_CHARS = 22;
 
     private final BingoPlugin plugin;
+    private final BingoConfig config;
 
     @Inject
-    private BingoProgressOverlay(BingoPlugin plugin) {
+    private BingoProgressOverlay(BingoPlugin plugin, BingoConfig config) {
         this.plugin = plugin;
+        this.config = config;
         setPosition(OverlayPosition.TOP_LEFT);
         panelComponent.setPreferredSize(new Dimension(200, 0));
     }
 
     @Override
     public Dimension render(Graphics2D graphics) {
+        if (!config.showProgressOverlay()) {
+            return null;
+        }
+
         panelComponent.getChildren().clear();
 
         BoardStateResponse state = plugin.getCurrentState();
