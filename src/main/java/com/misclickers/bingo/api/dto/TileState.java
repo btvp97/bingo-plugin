@@ -18,6 +18,13 @@ public class TileState {
     public String metric;
     public String mode;
     public java.util.List<String> sources;
+    // EACH mode only — per-source override of `target` (e.g. {"Goblin": 2,
+    // "Chicken": 3}). Null, or missing a given source, means that source
+    // uses `target` instead — see TileProgressFormatter.
+    public Map<String, Integer> sourceTargets;
+    // AND_OR mode only — list of OR-groups; the tile completes once every
+    // group has at least one satisfied condition. See TileProgressFormatter.
+    public java.util.List<TileGroup> groups;
     // Optional OSRS item ID to render (via ItemManager) instead of the tile's
     // title text — independent of metric/sources, see backend schema.prisma.
     // Gson leaves this null when the field is absent from the JSON response.
