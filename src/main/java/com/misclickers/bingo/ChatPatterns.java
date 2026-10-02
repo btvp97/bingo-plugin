@@ -118,8 +118,14 @@ public final class ChatPatterns {
     // lifetime running total each time, same shape as the boss "kill count
     // is: N" messages — like those, only used as a one-completion-happened
     // trigger (see ChatEventDetector), not to read the absolute total.
+    // Both numbers render in red in-game, i.e. wrapped in a <col=xxxxxx> tag
+    // same as KILL_COUNT/HUNTER_RUMOUR above — missed on the first pass,
+    // which meant the plain [0-9,]+ version never matched the real message
+    // at all (the tag sits directly between "completed"/"of" and the
+    // digits, breaking the literal match).
     public static final Pattern MAHOGANY_HOMES_CONTRACT = Pattern.compile(
-            "You have completed [0-9,]+ contracts? with a total of [0-9,]+ points\\.",
+            "You have completed (?:<col=[0-9a-f]{6}>)?[0-9,]+(?:</col>)? contracts? with a total of"
+                    + " (?:<col=[0-9a-f]{6}>)?[0-9,]+(?:</col>)? points\\.",
             Pattern.CASE_INSENSITIVE
     );
 
