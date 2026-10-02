@@ -3,6 +3,7 @@ package com.misclickers.bingo;
 import com.google.inject.Provides;
 import com.misclickers.bingo.ChatEventDetector.DetectedEvent;
 import com.misclickers.bingo.api.BingoApiClient;
+import com.misclickers.bingo.api.UnauthorizedException;
 import com.misclickers.bingo.api.dto.BoardStateResponse;
 import com.misclickers.bingo.api.dto.CompletionResponse;
 import com.misclickers.bingo.api.dto.JoinResponse;
@@ -245,7 +246,15 @@ public class BingoPlugin extends Plugin {
 
     @Subscribe
     public void onGameStateChanged(GameStateChanged event) {
-        if (event.getGameState() != GameState.LOGGED_IN || (joined && !joinCodeChanged())) {
+        // Previously skipped entirely whenever already `joined` with an
+        // unchanged join code — intended to avoid a pointless re-join, but
+        // it also meant a relog or world-hop that doesn't restart RuneLite
+        // itself (so `joined` is still true from before) never reloaded the
+        // board on login; the player had to hit Refresh manually every
+        // time. connectOrRefresh() already short-circuits to a plain
+        // refreshBoard() (not a full re-join) when nothing's actually
+        // changed, so always calling it here is cheap.
+        if (event.getGameState() != GameState.LOGGED_IN) {
             return;
         }
         new Thread(this::connectOrRefresh, "bingo-join").start();
@@ -312,7 +321,7 @@ public class BingoPlugin extends Plugin {
             this.joined = true;
             this.joinedCode = config.joinCode().trim();
             SwingUtilities.invokeLater(() -> panel.setTeamName(joinResponse.teamName));
-            refreshBoard();
+            refreshBoard(false);
         } catch (Exception e) {
             SwingUtilities.invokeLater(() -> panel.showError(e.getMessage()));
             this.joined = false;
@@ -321,6 +330,20 @@ public class BingoPlugin extends Plugin {
     }
 
     private void refreshBoard() {
+        refreshBoard(true);
+    }
+
+    /**
+     * allowRejoinOnUnauthorized is false only for the refresh attemptJoin()
+     * itself makes right after getting a brand new token — otherwise a
+     * server that somehow keeps rejecting even freshly issued tokens would
+     * send attemptJoin() and refreshBoard() into unbounded mutual recursion
+     * on the same thread until it stack-overflows, which (for the poll
+     * loop's thread) would silently kill all future polling, i.e. exactly
+     * the "has to restart the plugin" failure this is meant to fix, just
+     * better hidden. One rejoin attempt per real failure is enough.
+     */
+    private void refreshBoard(boolean allowRejoinOnUnauthorized) {
         if (boardId == null) {
             return;
         }
@@ -328,6 +351,16 @@ public class BingoPlugin extends Plugin {
             BoardStateResponse state = apiClient.fetchBoardState(boardId);
             this.currentState = state;
             SwingUtilities.invokeLater(() -> panel.render(state));
+        } catch (UnauthorizedException e) {
+            if (allowRejoinOnUnauthorized) {
+                // Token's missing/expired — re-join to get a fresh one
+                // instead of just sitting on the error until the player
+                // notices and restarts the plugin themselves.
+                joined = false;
+                attemptJoin();
+            } else {
+                SwingUtilities.invokeLater(() -> panel.showError("Session expired and rejoin failed — check your join code in settings"));
+            }
         } catch (Exception e) {
             SwingUtilities.invokeLater(() -> panel.showError(e.getMessage()));
         }

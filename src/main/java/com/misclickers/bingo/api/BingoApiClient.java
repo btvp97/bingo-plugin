@@ -42,6 +42,19 @@ public class BingoApiClient {
         return token;
     }
 
+    /**
+     * Thrown instead of falling through to the generic "HTTP N" IOException
+     * whenever the server says 401 — i.e. authenticateTeam rejected the
+     * token as missing, malformed, or expired. Callers that want to react
+     * by re-joining (see BingoPlugin.refreshBoard()) can catch this
+     * specifically rather than parsing error messages.
+     */
+    private static void throwIfUnauthorized(Response response, String action) throws UnauthorizedException {
+        if (response.code() == 401) {
+            throw new UnauthorizedException(action + " failed: token rejected (HTTP 401)");
+        }
+    }
+
     /** POST /teams/join — exchanges a join code + RSN for a session token. */
     public JoinResponse join(String joinCode, String rsn) throws IOException {
         String body = gson.toJson(new JoinRequestBody(joinCode, rsn));
@@ -72,6 +85,7 @@ public class BingoApiClient {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
+            throwIfUnauthorized(response, "Fetching board state");
             if (!response.isSuccessful() || response.body() == null) {
                 throw new IOException("Fetching board state failed: HTTP " + response.code());
             }
@@ -91,6 +105,7 @@ public class BingoApiClient {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
+            throwIfUnauthorized(response, "Fetching teams");
             if (!response.isSuccessful() || response.body() == null) {
                 throw new IOException("Fetching teams failed: HTTP " + response.code());
             }
@@ -114,6 +129,7 @@ public class BingoApiClient {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
+            throwIfUnauthorized(response, "Fetching team state");
             if (!response.isSuccessful() || response.body() == null) {
                 throw new IOException("Fetching team state failed: HTTP " + response.code());
             }
@@ -139,6 +155,7 @@ public class BingoApiClient {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
+            throwIfUnauthorized(response, "Reporting completion");
             if (!response.isSuccessful() || response.body() == null) {
                 throw new IOException("Reporting completion failed: HTTP " + response.code());
             }
