@@ -98,6 +98,11 @@ public final class ChatEventDetector {
             return new DetectedEvent("ACTIVITY_COMPLETION", "Bury " + boneType, 1, message);
         }
 
+        Matcher mahoganyHomes = ChatPatterns.MAHOGANY_HOMES_CONTRACT.matcher(message);
+        if (mahoganyHomes.find()) {
+            return new DetectedEvent("ACTIVITY_COMPLETION", "Mahogany Homes contract completion", 1, message);
+        }
+
         return null;
     }
 }

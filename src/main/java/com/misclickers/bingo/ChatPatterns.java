@@ -62,12 +62,17 @@ public final class ChatPatterns {
             "You have completed <col=[0-9a-f]{6}>([0-9,]+)</col> rumours? for the Hunter Guild\\."
     );
 
-    // Well-known, stable message text (not from RuneLite source, but this
-    // exact wording has been stable for years). Two variants depending on
-    // whether you have a follower out already.
+    // Verified against the OSRS Wiki's Pet page. Three variants: first-time
+    // pet with no follower out, first-time pet while already following
+    // another pet (goes to inventory instead), and a duplicate roll of a
+    // pet already owned (pets are tertiary drops, so these keep rolling
+    // even after you already have one). All three should count toward a
+    // repeatable "obtain any pet" tile — a dupe roll is still a real pet
+    // achievement, the player just already has that one.
     public static final Pattern PET_RECEIVED = Pattern.compile(
             "You have a funny feeling like you're being followed"
                     + "|You feel something weird sneaking into your backpack"
+                    + "|You have a funny feeling like you would have been followed"
     );
 
     // Verified against RuneLite source (embedded in their raid personal-best
@@ -106,5 +111,31 @@ public final class ChatPatterns {
     // in-game; likely candidate for the next round of fixes.
     public static final Pattern LMS_WIN = Pattern.compile(
             "Congratulations, you have won the game!"
+    );
+
+    // Confirmed exact text directly from in-game testing (user completed a
+    // contract and reported the live chat line). Reports the player's
+    // lifetime running total each time, same shape as the boss "kill count
+    // is: N" messages — like those, only used as a one-completion-happened
+    // trigger (see ChatEventDetector), not to read the absolute total.
+    public static final Pattern MAHOGANY_HOMES_CONTRACT = Pattern.compile(
+            "You have completed [0-9,]+ contracts? with a total of [0-9,]+ points\\.",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    // Confirmed exact text directly from in-game testing (user reported the
+    // live clan-chat drop broadcast line). Arrives as ChatMessageType
+    // CLAN_MESSAGE/CLAN_GUEST_MESSAGE — a system message in the clan chat,
+    // not a player-typed one — so BingoPlugin's type filter has to include
+    // those. This is the only detectable signal for items that never come
+    // from an NPC kill (minigame/Thieving/skilling rewards like Pharaoh's
+    // sceptre from Pyramid Plunder) — but since the broadcast is visible to
+    // every clan member, not just whoever got the drop, BingoPlugin must
+    // check the captured name against the local player before dispatching,
+    // or every online teammate would double-report the same drop. Also
+    // depends on the clan's own broadcast settings being on and its rarity/
+    // value threshold being low enough to actually announce the item.
+    public static final Pattern CLAN_DROP_BROADCAST = Pattern.compile(
+            "(.+?) received a (?:rare )?drop: (.+?)(?:\\s*\\([0-9,]+ coins\\))?$"
     );
 }
