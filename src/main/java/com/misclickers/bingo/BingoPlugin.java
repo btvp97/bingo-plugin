@@ -6,6 +6,7 @@ import com.misclickers.bingo.api.BingoApiClient;
 import com.misclickers.bingo.api.dto.BoardStateResponse;
 import com.misclickers.bingo.api.dto.CompletionResponse;
 import com.misclickers.bingo.api.dto.JoinResponse;
+import com.misclickers.bingo.api.dto.TeamsListResponse;
 import com.misclickers.bingo.api.dto.TileState;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -13,6 +14,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -29,6 +31,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ExecutorServiceExceptionLogger;
 import net.runelite.client.util.Text;
@@ -36,7 +39,9 @@ import net.runelite.client.util.Text;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -110,9 +115,15 @@ public class BingoPlugin extends Plugin {
     private static final String COMPLETION_SOUND_RESOURCE = "/tile_complete.wav";
 
     private BingoPanel panel;
+    private LeaderboardPanel leaderboardPanel;
     private NavigationButton navButton;
     private String boardId;
     private boolean joined;
+
+    // Team id currently selected in the leaderboard dropdown. Null until
+    // the teams list has loaded and a selection has been made (setTeams()
+    // auto-selects the first entry, which drives the first fetch).
+    private volatile String selectedLeaderboardTeamId;
 
     // The join code actually used for the current `joined` session, captured
     // at attemptJoin() time. Compared against config.joinCode() so a code
@@ -150,11 +161,38 @@ public class BingoPlugin extends Plugin {
         panel = new BingoPanel(itemManager);
         panel.setOnRefresh(() -> new Thread(this::connectOrRefresh, "bingo-refresh").start());
 
+        leaderboardPanel = new LeaderboardPanel(itemManager);
+        leaderboardPanel.setOnTeamSelected(teamId -> {
+            selectedLeaderboardTeamId = teamId;
+            new Thread(() -> refreshLeaderboardTeam(teamId), "bingo-leaderboard-select").start();
+        });
+
+        // BingoPanel itself is a PluginPanel (required by NavigationButton),
+        // so the tab container has to be a separate, plain PluginPanel that
+        // just hosts a JTabbedPane wrapping both views.
+        // PluginPanel is abstract — this anonymous subclass has nothing to
+        // override, it just exists to satisfy that and give the
+        // JTabbedPane something concrete to live inside.
+        PluginPanel container = new PluginPanel(false) {};
+        container.setLayout(new BorderLayout());
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("My Board", panel);
+        tabs.addTab("Leaderboard", leaderboardPanel);
+        // Loads the teams list (and, once selected, that team's state) the
+        // first time the player actually opens the tab, rather than on every
+        // startUp()/poll regardless of whether they ever look at it.
+        tabs.addChangeListener(e -> {
+            if (tabs.getSelectedComponent() == leaderboardPanel && joined) {
+                new Thread(this::refreshLeaderboardTeams, "bingo-leaderboard-teams").start();
+            }
+        });
+        container.add(tabs, BorderLayout.CENTER);
+
         navButton = NavigationButton.builder()
                 .tooltip("Misclickers Clan Bingo")
                 .icon(createBingoIcon())
                 .priority(5)
-                .panel(panel)
+                .panel(container)
                 .build();
         clientToolbar.addNavigation(navButton);
         overlayManager.add(completionOverlay);
@@ -164,6 +202,15 @@ public class BingoPlugin extends Plugin {
         pollFuture = pollExecutor.scheduleWithFixedDelay(() -> {
             if (joined) {
                 refreshBoard();
+                // Keeps whichever team is currently selected in the
+                // leaderboard dropdown up to date too, same cadence as the
+                // player's own board — the dropdown itself only (re)loads
+                // when the player opens the tab (see the JTabbedPane
+                // ChangeListener in startUp()).
+                String selectedTeamId = selectedLeaderboardTeamId;
+                if (selectedTeamId != null) {
+                    refreshLeaderboardTeam(selectedTeamId);
+                }
             }
         }, POLL_INTERVAL_SECONDS, POLL_INTERVAL_SECONDS, TimeUnit.SECONDS);
 
@@ -188,6 +235,7 @@ public class BingoPlugin extends Plugin {
         joined = false;
         boardId = null;
         joinedCode = null;
+        selectedLeaderboardTeamId = null;
     }
 
     /** Read by BingoProgressOverlay to render live per-tile progress. */
@@ -285,9 +333,55 @@ public class BingoPlugin extends Plugin {
         }
     }
 
+    /** Fetches the board's team list and populates the leaderboard dropdown. */
+    private void refreshLeaderboardTeams() {
+        if (boardId == null) {
+            return;
+        }
+        try {
+            TeamsListResponse response = apiClient.fetchTeams(boardId);
+            SwingUtilities.invokeLater(() -> leaderboardPanel.setTeams(response.teams));
+        } catch (Exception e) {
+            SwingUtilities.invokeLater(() -> leaderboardPanel.showError(e.getMessage()));
+        }
+    }
+
+    /** Fetches and renders one other team's board state for the leaderboard tab. */
+    private void refreshLeaderboardTeam(String teamId) {
+        if (boardId == null) {
+            return;
+        }
+        try {
+            BoardStateResponse state = apiClient.fetchTeamState(boardId, teamId);
+            SwingUtilities.invokeLater(() -> leaderboardPanel.render(state));
+        } catch (Exception e) {
+            SwingUtilities.invokeLater(() -> leaderboardPanel.showError(e.getMessage()));
+        }
+    }
+
     @Subscribe
     public void onChatMessage(ChatMessage event) {
-        if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) {
+        // Matches RuneLite's own ChatCommandsPlugin.onChatMessage() type
+        // filter exactly (TRADE/GAMEMESSAGE/SPAM/FRIENDSCHATNOTIFICATION).
+        // Previously this only allowed GAMEMESSAGE/SPAM, which silently
+        // dropped raid-completion messages — RuneLite's RaidsPlugin sends
+        // "Congratulations - your raid is complete!" as
+        // FRIENDSCHATNOTIFICATION specifically, and boss/activity kill-count
+        // messages (e.g. "Your completed Chambers of Xeric: Challenge Mode
+        // count is: N") can arrive that way too. Without this, RAID_COMPLETE
+        // and any raid-related KILL_COUNT match never reached
+        // ChatEventDetector.detect() at all.
+        // Also allow CLAN_MESSAGE/CLAN_GUEST_MESSAGE — the modern clan drop
+        // broadcast ("<name> received a drop: <item>") is a clan *system*
+        // message, not GAMEMESSAGE/SPAM/FRIENDSCHATNOTIFICATION, and it's
+        // currently the only way to detect minigame/Thieving/skilling drops
+        // that never pass through an NPC kill (e.g. Pharaoh's sceptre).
+        if (event.getType() != ChatMessageType.TRADE
+                && event.getType() != ChatMessageType.GAMEMESSAGE
+                && event.getType() != ChatMessageType.SPAM
+                && event.getType() != ChatMessageType.FRIENDSCHATNOTIFICATION
+                && event.getType() != ChatMessageType.CLAN_MESSAGE
+                && event.getType() != ChatMessageType.CLAN_GUEST_MESSAGE) {
             return;
         }
 
@@ -299,6 +393,23 @@ public class BingoPlugin extends Plugin {
         Matcher larranChest = ChatPatterns.LARRAN_CHEST_OPENED.matcher(event.getMessage());
         if (larranChest.find()) {
             pendingChestSnapshot = snapshotInventory();
+        }
+
+        // Clan drop broadcasts are visible to every clan member, not just
+        // whoever got the drop — without this check, every online teammate's
+        // client would independently report the same single drop, inflating
+        // team progress by however many teammates happened to be logged in.
+        // Only dispatch when the broadcast is actually about the local player.
+        Matcher dropBroadcast = ChatPatterns.CLAN_DROP_BROADCAST.matcher(event.getMessage());
+        if (dropBroadcast.find()) {
+            String reportedName = dropBroadcast.group(1).trim().replace(' ', ' ');
+            String itemName = dropBroadcast.group(2).trim();
+            Player localPlayer = client.getLocalPlayer();
+            String localName = localPlayer == null ? null : localPlayer.getName();
+            if (localName != null && localName.trim().replace(' ', ' ').equalsIgnoreCase(reportedName)) {
+                dispatch(new DetectedEvent("ITEM_OBTAINED", itemName, 1, event.getMessage()));
+            }
+            return;
         }
 
         DetectedEvent detected = ChatEventDetector.detect(event.getMessage());

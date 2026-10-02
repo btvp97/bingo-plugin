@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.misclickers.bingo.api.dto.BoardStateResponse;
 import com.misclickers.bingo.api.dto.CompletionResponse;
 import com.misclickers.bingo.api.dto.JoinResponse;
+import com.misclickers.bingo.api.dto.TeamsListResponse;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -73,6 +74,48 @@ public class BingoApiClient {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 throw new IOException("Fetching board state failed: HTTP " + response.code());
+            }
+            return gson.fromJson(response.body().string(), BoardStateResponse.class);
+        }
+    }
+
+    /** GET /boards/:boardId/teams — list of every team on the board, for the leaderboard dropdown. */
+    public TeamsListResponse fetchTeams(String boardId) throws IOException {
+        if (token == null) {
+            throw new IllegalStateException("Not joined yet — call join() first");
+        }
+        Request request = new Request.Builder()
+                .url(baseUrl + "/boards/" + boardId + "/teams")
+                .header("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                throw new IOException("Fetching teams failed: HTTP " + response.code());
+            }
+            return gson.fromJson(response.body().string(), TeamsListResponse.class);
+        }
+    }
+
+    /**
+     * GET /boards/:boardId/teams/:targetTeamId/state — same shape as
+     * fetchBoardState, but for another team on the board. Used by the
+     * leaderboard tab's read-only spectate view.
+     */
+    public BoardStateResponse fetchTeamState(String boardId, String targetTeamId) throws IOException {
+        if (token == null) {
+            throw new IllegalStateException("Not joined yet — call join() first");
+        }
+        Request request = new Request.Builder()
+                .url(baseUrl + "/boards/" + boardId + "/teams/" + targetTeamId + "/state")
+                .header("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                throw new IOException("Fetching team state failed: HTTP " + response.code());
             }
             return gson.fromJson(response.body().string(), BoardStateResponse.class);
         }
