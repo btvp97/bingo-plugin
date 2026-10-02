@@ -17,8 +17,12 @@ public final class TileProgressFormatter {
      * this is how many of the required sources have hit their own target so
      * far. For "and_or" mode tiles it's how many of the tile's OR-groups
      * already have a satisfied condition (out of the total group count). For
-     * "sum" mode tiles it's raw progress against the target (e.g. kill count
-     * so far / kills needed).
+     * "or_and" mode tiles it's progress toward whichever single AND-set is
+     * furthest along (e.g. 2/3 Blood Moon pieces, even if other sets have
+     * fewer) — there's no single shared "x out of y" across sets the way
+     * AND_OR has across groups, since only one set needs to fully complete.
+     * For "sum" mode tiles it's raw progress against the target (e.g. kill
+     * count so far / kills needed).
      */
     public static String format(TileState tile) {
         if ("EACH".equals(tile.mode) && tile.sources != null && !tile.sources.isEmpty()) {
@@ -40,6 +44,19 @@ public final class TileProgressFormatter {
             }
             return satisfiedGroups + "/" + tile.groups.size();
         }
+        if ("OR_AND".equals(tile.mode) && tile.sets != null && !tile.sets.isEmpty()) {
+            int bestSatisfied = 0;
+            int bestTotal = tile.sets.get(0).conditions == null ? 0 : tile.sets.get(0).conditions.size();
+            for (TileGroup set : tile.sets) {
+                int total = set.conditions == null ? 0 : set.conditions.size();
+                int satisfied = satisfiedCount(tile, set);
+                if (satisfied > bestSatisfied || (satisfied == bestSatisfied && total < bestTotal)) {
+                    bestSatisfied = satisfied;
+                    bestTotal = total;
+                }
+            }
+            return bestSatisfied + "/" + bestTotal;
+        }
         return Math.min(tile.sumProgress, tile.target) + "/" + tile.target;
     }
 
@@ -55,6 +72,21 @@ public final class TileProgressFormatter {
             }
         }
         return false;
+    }
+
+    /** How many of a set's own conditions are individually satisfied. */
+    private static int satisfiedCount(TileState tile, TileGroup set) {
+        if (set.conditions == null) {
+            return 0;
+        }
+        int count = 0;
+        for (Condition condition : set.conditions) {
+            Integer progress = tile.eachProgress != null ? tile.eachProgress.get(condition.source) : null;
+            if (progress != null && progress >= condition.target) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**

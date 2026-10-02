@@ -25,6 +25,12 @@ public class TileState {
     // AND_OR mode only — list of OR-groups; the tile completes once every
     // group has at least one satisfied condition. See TileProgressFormatter.
     public java.util.List<TileGroup> groups;
+    // OR_AND mode only — list of AND-sets; the tile completes once any one
+    // set has every one of its own conditions satisfied. Reuses the same
+    // TileGroup shape as `groups` (just a list of conditions) since the
+    // structure is identical — only the completion rule differs, and that
+    // lives in TileProgressFormatter, not the DTO. See Mode.OR_AND.
+    public java.util.List<TileGroup> sets;
     // Optional OSRS item ID to render (via ItemManager) instead of the tile's
     // title text — independent of metric/sources, see backend schema.prisma.
     // Gson leaves this null when the field is absent from the JSON response.
